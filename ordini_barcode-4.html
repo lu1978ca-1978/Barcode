@@ -228,6 +228,21 @@ td.codice{font-family:var(--mono);color:var(--teal);font-size:12.5px;}
 .cam-chip.ok{background:rgba(61,220,132,.1);color:var(--green);border:1px solid rgba(61,220,132,.25);}
 .cam-chip.err{background:rgba(255,92,92,.1);color:var(--red);border:1px solid rgba(255,92,92,.25);}
 
+.badge.red{background:rgba(255,92,92,.12);color:var(--red);}
+
+tr.row-missing{background:rgba(255,92,92,.06);}
+tr.row-excess{background:rgba(255,138,61,.06);}
+tr.row-unexpected{background:rgba(255,92,92,.1);}
+tr.row-ok td.codice{color:var(--green);}
+
+.verifica-group{margin-bottom:14px;}
+.verifica-group h3{font-size:12px;text-transform:uppercase;letter-spacing:.4px;margin:0 0 8px;color:var(--muted);}
+.verifica-line{display:flex;justify-content:space-between;font-size:13px;padding:6px 10px;border-radius:6px;margin-bottom:4px;font-family:var(--mono);}
+.verifica-line.missing{background:rgba(255,92,92,.08);color:var(--red);}
+.verifica-line.excess{background:rgba(255,138,61,.08);color:var(--amber);}
+.verifica-line.unexpected{background:rgba(255,92,92,.12);color:var(--red);}
+.verifica-ok{color:var(--green);font-size:13px;font-family:var(--mono);}
+
 @media print{
   header,nav,.no-print{display:none !important;}
   body{background:#fff;color:#000;}
@@ -292,6 +307,19 @@ td.codice{font-family:var(--mono);color:var(--teal);font-size:12.5px;}
   </div>
 
   <div class="panel">
+    <div class="row" style="justify-content:space-between;">
+      <h2 style="margin:0;">Verifica ordine (opzionale)</h2>
+      <span class="badge muted" id="refBadge">Nessun ordine di riferimento</span>
+    </div>
+    <p class="sub">Carica il file Excel dell'ordine atteso (codice articolo + quantità) per segnalare in automatico articoli mancanti, in eccesso o non previsti durante la scansione.</p>
+    <div class="row">
+      <button class="btn" id="btnCaricaRiferimento">Carica ordine di riferimento</button>
+      <button class="btn btn-ghost" id="btnRimuoviRiferimento" style="display:none;">Rimuovi verifica</button>
+    </div>
+    <input type="file" id="refFileInput" accept=".xlsx,.xls,.csv" style="display:none;">
+  </div>
+
+  <div class="panel">
     <h2>Scansione barcode</h2>
     <p class="sub">Il campo resta sempre attivo: punta il lettore e spara. Invio automatico dello scanner aggiunge la riga.</p>
     <div class="scanbox" id="scanBox">
@@ -324,7 +352,7 @@ td.codice{font-family:var(--mono);color:var(--teal);font-size:12.5px;}
       <span class="badge muted" id="rigaCount">0 righe</span>
     </div>
     <table>
-      <thead>
+      <thead id="orderHead">
         <tr>
           <th>Codice</th><th>Descrizione</th><th class="num">Prezzo</th><th class="num">Qtà</th><th class="num">Totale</th><th></th>
         </tr>
@@ -337,6 +365,11 @@ td.codice{font-family:var(--mono);color:var(--teal);font-size:12.5px;}
       <div><span class="t-label">Articoli</span><span class="t-val" id="totArticoli">0</span></div>
       <div><span class="t-label">Totale</span><span class="t-val amber" id="totImporto">€ 0,00</span></div>
     </div>
+  </div>
+
+  <div class="panel" id="verificaPanel" style="display:none;">
+    <h2>Esito verifica</h2>
+    <div id="verificaSummary"></div>
   </div>
 
   <div class="panel no-print">
@@ -434,7 +467,8 @@ let order = {
   riferimento: '',
   data: new Date().toISOString().slice(0,10),
   note: '',
-  righe: [] // {codice, descrizione, barcode, prezzo, qty}
+  righe: [], // {codice, descrizione, barcode, prezzo, qty, atteso}
+  refItems: [] // {codice, descrizione, qtyAtteso} — ordine di riferimento caricato
 };
 let pendingParse = null; // {headers, rows} during column mapping
 
@@ -444,13 +478,13 @@ const fmtMoney = n => '€ ' + (Number(n)||0).toLocaleString('it-IT',{minimumFra
 // STORAGE HELPERS
 // ============================================================
 async function storeSet(key, value){
-  try{ await window.storage.set(key, JSON.stringify(value), false); }
+  try{ localStorage.setItem(key, JSON.stringify(value)); }
   catch(e){ console.error('storage set failed', key, e); }
 }
 async function storeGet(key){
   try{
-    const r = await window.storage.get(key, false);
-    return r ? JSON.parse(r.value) : null;
+    const v = localStorage.getItem(key);
+    return v !== null ? JSON.parse(v) : null;
   }catch(e){ return null; }
 }
 
@@ -460,6 +494,7 @@ async function saveOrderDraft(){
 async function loadOrderDraft(){
   const d = await storeGet('ordine-corrente');
   if(d){ order = d; }
+  order.refItems = order.refItems || [];
 }
 async function saveAnagrafica(){
   await storeSet('anagrafica-data', anagrafica);
@@ -568,8 +603,18 @@ scanInput.addEventListener('keydown', (e)=>{
   }
 });
 
+function normalizeCode(c){
+  return String(c||'').trim().replace(/^0+(?=\d)/, '');
+}
+function findByCode(code){
+  const norm = normalizeCode(code);
+  return anagrafica.find(r => r.barcode === code) ||
+         anagrafica.find(r => r.codice === code) ||
+         (norm ? anagrafica.find(r => normalizeCode(r.barcode) === norm) : undefined);
+}
+
 function handleScan(code){
-  const item = anagrafica.find(r => r.barcode === code) || anagrafica.find(r => r.codice === code);
+  const item = findByCode(code);
   if(item){
     addLine(item, 1);
     flashScan('ok', `✓ ${item.codice} — ${item.descrizione}`);
@@ -633,22 +678,64 @@ function addLine(item, qty){
   if(existing){
     existing.qty += qty;
   } else {
+    const ref = (order.refItems||[]).find(r => r.codice === item.codice);
     order.righe.push({
       codice: item.codice,
       descrizione: item.descrizione,
       barcode: item.barcode || '',
       prezzo: Number(item.prezzo)||0,
-      qty: qty
+      qty: qty,
+      atteso: ref ? ref.qtyAtteso : null
     });
   }
   renderOrderRows();
   saveOrderDraft();
 }
 
+function rowStatus(r){
+  if(r.atteso===null || r.atteso===undefined) return r.qty>0 ? 'unexpected' : null;
+  if(r.qty < r.atteso) return 'missing';
+  if(r.qty > r.atteso) return 'excess';
+  return 'ok';
+}
+function statusBadge(status){
+  if(status==='missing') return '<span class="badge red">Mancante</span>';
+  if(status==='excess') return '<span class="badge amber">Eccesso</span>';
+  if(status==='unexpected') return '<span class="badge red">Non previsto</span>';
+  if(status==='ok') return '<span class="badge green">OK</span>';
+  return '';
+}
+
 function renderOrderRows(){
   const tbody = document.getElementById('orderRows');
+  const thead = document.getElementById('orderHead');
+  const hasRef = order.refItems && order.refItems.length > 0;
+
+  thead.innerHTML = hasRef
+    ? `<tr><th>Codice</th><th>Descrizione</th><th class="num">Atteso</th><th class="num">Qtà</th><th>Stato</th><th></th></tr>`
+    : `<tr><th>Codice</th><th>Descrizione</th><th class="num">Prezzo</th><th class="num">Qtà</th><th class="num">Totale</th><th></th></tr>`;
+
   if(order.righe.length === 0){
     tbody.innerHTML = `<tr class="empty-row"><td colspan="6">Nessuna riga. Scansiona un codice a barre per iniziare.</td></tr>`;
+  } else if(hasRef){
+    tbody.innerHTML = order.righe.map((r,i)=>{
+      const status = rowStatus(r);
+      return `
+      <tr data-i="${i}" class="${status?'row-'+status:''}">
+        <td class="codice">${escapeHtml(r.codice)}</td>
+        <td>${escapeHtml(r.descrizione)}</td>
+        <td class="num">${r.atteso ?? '—'}</td>
+        <td class="num">
+          <div class="qty-ctrl">
+            <button class="qty-dec" data-i="${i}">−</button>
+            <input type="number" class="qty-input" data-i="${i}" value="${r.qty}" min="0">
+            <button class="qty-inc" data-i="${i}">+</button>
+          </div>
+        </td>
+        <td>${statusBadge(status)}</td>
+        <td><button class="rm-btn" data-i="${i}" title="Rimuovi riga">✕</button></td>
+      </tr>`;
+    }).join('');
   } else {
     tbody.innerHTML = order.righe.map((r,i)=>`
       <tr data-i="${i}">
@@ -671,6 +758,42 @@ function renderOrderRows(){
   const totImp = order.righe.reduce((s,r)=>s+r.qty*r.prezzo,0);
   document.getElementById('totArticoli').textContent = totArt;
   document.getElementById('totImporto').textContent = fmtMoney(totImp);
+  renderVerificaSummary();
+}
+
+function renderVerificaSummary(){
+  const panel = document.getElementById('verificaPanel');
+  const box = document.getElementById('verificaSummary');
+  if(!order.refItems || order.refItems.length===0){
+    panel.style.display = 'none';
+    return;
+  }
+  panel.style.display = 'block';
+  const missing = order.righe.filter(r => r.atteso!=null && r.qty < r.atteso);
+  const excess = order.righe.filter(r => r.atteso!=null && r.qty > r.atteso);
+  const unexpected = order.righe.filter(r => (r.atteso===null||r.atteso===undefined) && r.qty>0);
+
+  if(missing.length===0 && excess.length===0 && unexpected.length===0){
+    box.innerHTML = `<div class="verifica-ok">✓ Tutto corrisponde all'ordine di riferimento.</div>`;
+    return;
+  }
+  let html = '';
+  if(missing.length){
+    html += `<div class="verifica-group"><h3>Mancanti (${missing.length})</h3>` +
+      missing.map(r=>`<div class="verifica-line missing"><span>${escapeHtml(r.codice)} — ${escapeHtml(r.descrizione)}</span><span>${r.qty}/${r.atteso}</span></div>`).join('') +
+      `</div>`;
+  }
+  if(excess.length){
+    html += `<div class="verifica-group"><h3>In eccesso (${excess.length})</h3>` +
+      excess.map(r=>`<div class="verifica-line excess"><span>${escapeHtml(r.codice)} — ${escapeHtml(r.descrizione)}</span><span>+${r.qty-r.atteso}</span></div>`).join('') +
+      `</div>`;
+  }
+  if(unexpected.length){
+    html += `<div class="verifica-group"><h3>Non previsti (${unexpected.length})</h3>` +
+      unexpected.map(r=>`<div class="verifica-line unexpected"><span>${escapeHtml(r.codice)} — ${escapeHtml(r.descrizione)}</span><span>${r.qty} pz</span></div>`).join('') +
+      `</div>`;
+  }
+  box.innerHTML = html;
 }
 
 document.getElementById('orderRows').addEventListener('click', (e)=>{
@@ -678,29 +801,124 @@ document.getElementById('orderRows').addEventListener('click', (e)=>{
   if(i===undefined) return;
   if(e.target.classList.contains('qty-inc')){ order.righe[i].qty++; }
   else if(e.target.classList.contains('qty-dec')){ order.righe[i].qty = Math.max(0,order.righe[i].qty-1); }
-  else if(e.target.classList.contains('rm-btn')){ order.righe.splice(i,1); }
+  else if(e.target.classList.contains('rm-btn')){ order.righe.splice(i,1); renderOrderRows(); saveOrderDraft(); return; }
   else return;
-  if(order.righe[i] && order.righe[i].qty===0) order.righe.splice(i,1);
+  const row = order.righe[i];
+  if(row && row.qty===0 && (row.atteso===null||row.atteso===undefined)) order.righe.splice(i,1);
   renderOrderRows();
   saveOrderDraft();
 });
 document.getElementById('orderRows').addEventListener('change', (e)=>{
   if(e.target.classList.contains('qty-input')){
     const i = e.target.dataset.i;
-    let v = parseInt(e.target.value)||0;
-    if(v<=0){ order.righe.splice(i,1); } else { order.righe[i].qty = v; }
+    let v = Math.max(0, parseInt(e.target.value)||0);
+    const row = order.righe[i];
+    if(v===0 && (row.atteso===null||row.atteso===undefined)){ order.righe.splice(i,1); }
+    else { row.qty = v; }
     renderOrderRows();
     saveOrderDraft();
   }
 });
 
 // ============================================================
+// ORDINE DI RIFERIMENTO (VERIFICA)
+// ============================================================
+function updateRefBadge(){
+  const badge = document.getElementById('refBadge');
+  const btnRimuovi = document.getElementById('btnRimuoviRiferimento');
+  if(order.refItems && order.refItems.length>0){
+    badge.className = 'badge amber';
+    badge.textContent = `Verifica attiva: ${order.refItems.length} articoli attesi`;
+    btnRimuovi.style.display = 'inline-flex';
+  } else {
+    badge.className = 'badge muted';
+    badge.textContent = 'Nessun ordine di riferimento';
+    btnRimuovi.style.display = 'none';
+  }
+}
+
+document.getElementById('btnCaricaRiferimento').addEventListener('click', ()=>document.getElementById('refFileInput').click());
+document.getElementById('refFileInput').addEventListener('change', e=>{
+  if(e.target.files[0]) parseReferenceFile(e.target.files[0]);
+});
+document.getElementById('btnRimuoviRiferimento').addEventListener('click', ()=>{
+  if(!confirm('Rimuovere la verifica e tornare alla modalità ordine libero?')) return;
+  order.refItems = [];
+  order.righe = order.righe.filter(r=>r.qty>0).map(r=>{ const {atteso, ...rest}=r; return rest; });
+  updateRefBadge();
+  renderOrderRows();
+  saveOrderDraft();
+});
+
+function parseReferenceFile(file){
+  const reader = new FileReader();
+  reader.onload = (e)=>{
+    try{
+      const wb = XLSX.read(e.target.result, {type:'array'});
+      const sheet = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(sheet, {header:1, defval:''});
+      if(rows.length < 2){ alert('File vuoto o non leggibile.'); return; }
+      const headers = rows[0].map(h=>String(h).trim().toLowerCase());
+      const dataRows = rows.slice(1).filter(r=>r.some(c=>String(c).trim()!==''));
+
+      const idxCodice = headers.findIndex(h=>['codice','cod. articolo','cod articolo','articolo'].some(c=>h.includes(c)));
+      const idxQty = headers.findIndex(h=>['quantit','qta','qty','pezzi'].some(c=>h.includes(c)));
+      const idxDesc = headers.findIndex(h=>['descrizione','desc'].some(c=>h.includes(c)));
+
+      if(idxCodice===-1 || idxQty===-1){
+        alert('Non trovo le colonne "Codice" e "Quantità" nel file. Assicurati che il file abbia intestazioni chiare (es. Codice, Quantità).');
+        return;
+      }
+
+      const refItems = dataRows.map(r=>{
+        const codice = String(r[idxCodice]??'').trim();
+        const qtyAtteso = parseFloat(String(r[idxQty]).replace(',','.'))||0;
+        let descrizione = idxDesc!==-1 ? String(r[idxDesc]??'').trim() : '';
+        if(!descrizione){
+          const a = anagrafica.find(a=>a.codice===codice);
+          if(a) descrizione = a.descrizione;
+        }
+        return {codice, descrizione, qtyAtteso};
+      }).filter(r=>r.codice);
+
+      order.refItems = refItems;
+      refItems.forEach(ref=>{
+        const existing = order.righe.find(r=>r.codice===ref.codice);
+        if(existing){
+          existing.atteso = ref.qtyAtteso;
+          if(!existing.descrizione) existing.descrizione = ref.descrizione;
+        } else {
+          const a = anagrafica.find(a=>a.codice===ref.codice);
+          order.righe.push({
+            codice: ref.codice,
+            descrizione: ref.descrizione || (a ? a.descrizione : '(non in anagrafica)'),
+            barcode: a ? a.barcode : '',
+            prezzo: a ? (Number(a.prezzo)||0) : 0,
+            qty: 0,
+            atteso: ref.qtyAtteso
+          });
+        }
+      });
+
+      updateRefBadge();
+      renderOrderRows();
+      saveOrderDraft();
+      document.getElementById('refFileInput').value = '';
+    }catch(err){
+      alert('Errore nella lettura del file: ' + err.message);
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+// ============================================================
 // NUOVO ORDINE
 // ============================================================
 document.getElementById('btnNuovo').addEventListener('click', ()=>{
   if(order.righe.length>0 && !confirm('Iniziare un nuovo ordine? Le righe correnti andranno perse se non esportate.')) return;
-  order = {tipo:'fornitore', soggetto:'', riferimento:'', data:new Date().toISOString().slice(0,10), note:'', righe:[]};
+  order = {tipo:'fornitore', soggetto:'', riferimento:'', data:new Date().toISOString().slice(0,10), note:'', righe:[], refItems:[]};
   renderHeaderFields();
+  updateRefBadge();
   renderOrderRows();
   saveOrderDraft();
   focusScan();
@@ -717,6 +935,7 @@ document.getElementById('btnStampa').addEventListener('click', ()=>window.print(
 document.getElementById('btnEsporta').addEventListener('click', async ()=>{
   if(order.righe.length===0){ alert('Aggiungi almeno una riga prima di esportare.'); return; }
 
+  const hasRef = order.refItems && order.refItems.length>0;
   const headerRows = [
     ['Tipo ordine', order.tipo==='fornitore' ? 'Fornitore' : 'Cliente'],
     [order.tipo==='fornitore' ? 'Fornitore' : 'Cliente', order.soggetto || ''],
@@ -725,13 +944,24 @@ document.getElementById('btnEsporta').addEventListener('click', async ()=>{
     ['Note', order.note || ''],
     []
   ];
-  const colHeaders = ['Codice','Descrizione','Barcode','Quantità','Prezzo Unitario','Totale Riga'];
-  const dataRows = order.righe.map(r => [r.codice, r.descrizione, r.barcode, r.qty, r.prezzo, +(r.prezzo*r.qty).toFixed(2)]);
-  const totRow = ['','','','','Totale ordine', +order.righe.reduce((s,r)=>s+r.qty*r.prezzo,0).toFixed(2)];
+
+  let colHeaders, dataRows, totRow, colWidths;
+  if(hasRef){
+    const statusLabel = r => { const s = rowStatus(r); return s==='ok'?'OK':s==='missing'?'Mancante':s==='excess'?'Eccesso':s==='unexpected'?'Non previsto':''; };
+    colHeaders = ['Codice','Descrizione','Barcode','Atteso','Quantità Scansionata','Differenza','Stato'];
+    dataRows = order.righe.map(r => [r.codice, r.descrizione, r.barcode, r.atteso ?? '', r.qty, (r.atteso!=null ? r.qty-r.atteso : ''), statusLabel(r)]);
+    totRow = ['','','','','','',''];
+    colWidths = [{wch:14},{wch:38},{wch:16},{wch:10},{wch:12},{wch:10},{wch:14}];
+  } else {
+    colHeaders = ['Codice','Descrizione','Barcode','Quantità','Prezzo Unitario','Totale Riga'];
+    dataRows = order.righe.map(r => [r.codice, r.descrizione, r.barcode, r.qty, r.prezzo, +(r.prezzo*r.qty).toFixed(2)]);
+    totRow = ['','','','','Totale ordine', +order.righe.reduce((s,r)=>s+r.qty*r.prezzo,0).toFixed(2)];
+    colWidths = [{wch:14},{wch:38},{wch:16},{wch:10},{wch:14},{wch:14}];
+  }
 
   const wsData = [...headerRows, colHeaders, ...dataRows, [], totRow];
   const ws = XLSX.utils.aoa_to_sheet(wsData);
-  ws['!cols'] = [{wch:14},{wch:38},{wch:16},{wch:10},{wch:14},{wch:14}];
+  ws['!cols'] = colWidths;
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Ordine');
 
@@ -776,7 +1006,9 @@ document.getElementById('archiveList').addEventListener('click', async (e)=>{
   const saved = await storeGet('ordine:'+id);
   if(saved){
     order = saved;
+    order.refItems = order.refItems || [];
     renderHeaderFields();
+    updateRefBadge();
     renderOrderRows();
     saveOrderDraft();
     document.querySelector('.tab-btn[data-view="ordine"]').click();
@@ -969,7 +1201,7 @@ function handleCameraScan(code){
   if(code === lastCamCode && (now - lastCamTime) < CAM_COOLDOWN) return;
   lastCamCode = code; lastCamTime = now;
 
-  const item = anagrafica.find(r => r.barcode === code) || anagrafica.find(r => r.codice === code);
+  const item = findByCode(code);
   const feed = document.getElementById('camFeed');
   const chip = document.createElement('div');
   if(item){
@@ -1003,6 +1235,7 @@ function escapeHtml(s){
   await loadAnagrafica();
   await loadOrderDraft();
   renderHeaderFields();
+  updateRefBadge();
   renderOrderRows();
   renderAnagraficaStatus();
   renderAnagraficaPreview();
