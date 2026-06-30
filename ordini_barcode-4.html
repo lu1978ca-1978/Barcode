@@ -1,0 +1,1014 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ordini Barcode — Power Group</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.20.0/umd/index.min.js"></script>
+<style>
+:root{
+  --bg:#0F1419;
+  --panel:#161D27;
+  --panel-2:#1C2531;
+  --border:#2A3340;
+  --text:#E8EDF2;
+  --muted:#8A97A8;
+  --amber:#FF8A3D;
+  --amber-dim:#7A4A28;
+  --teal:#2DD4BF;
+  --teal-dim:#1A5C53;
+  --red:#FF5C5C;
+  --green:#3DDC84;
+  --mono: 'SF Mono', 'JetBrains Mono', Consolas, 'Courier New', monospace;
+  --sans: -apple-system, 'Segoe UI', Roboto, system-ui, sans-serif;
+}
+*{box-sizing:border-box;}
+html,body{margin:0;padding:0;}
+body{
+  background:var(--bg);
+  color:var(--text);
+  font-family:var(--sans);
+  min-height:100vh;
+}
+::selection{background:var(--amber-dim);}
+
+/* ===== HEADER ===== */
+header{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:14px 22px;
+  background:var(--panel);
+  border-bottom:1px solid var(--border);
+  position:sticky;top:0;z-index:50;
+}
+.brand{display:flex;align-items:center;gap:10px;}
+.brand-mark{
+  width:30px;height:30px;border-radius:6px;
+  background:linear-gradient(135deg,var(--amber),var(--teal));
+  display:flex;align-items:center;justify-content:center;
+  font-family:var(--mono);font-weight:700;font-size:13px;color:#0F1419;
+}
+.brand-text{display:flex;flex-direction:column;line-height:1.1;}
+.brand-text b{font-size:15px;letter-spacing:.2px;}
+.brand-text span{font-size:11px;color:var(--muted);font-family:var(--mono);}
+
+nav{display:flex;gap:4px;background:var(--panel-2);padding:4px;border-radius:8px;border:1px solid var(--border);}
+nav button{
+  background:transparent;border:none;color:var(--muted);
+  padding:8px 16px;border-radius:6px;font-size:13px;font-weight:600;
+  cursor:pointer;font-family:var(--sans);transition:.15s;
+}
+nav button.active{background:var(--amber);color:#1A1208;}
+nav button:not(.active):hover{color:var(--text);background:#222C3A;}
+
+main{max-width:1180px;margin:0 auto;padding:24px 20px 80px;}
+.view{display:none;}
+.view.active{display:block;}
+
+/* ===== PANELS ===== */
+.panel{
+  background:var(--panel);border:1px solid var(--border);
+  border-radius:10px;padding:20px;margin-bottom:18px;
+}
+.panel h2{margin:0 0 4px;font-size:16px;}
+.panel .sub{color:var(--muted);font-size:12.5px;margin:0 0 16px;}
+.grid{display:grid;gap:14px;}
+.grid-2{grid-template-columns:1fr 1fr;}
+.grid-3{grid-template-columns:1fr 1fr 1fr;}
+@media(max-width:720px){.grid-2,.grid-3{grid-template-columns:1fr;}}
+
+label{display:block;font-size:11.5px;color:var(--muted);margin-bottom:5px;text-transform:uppercase;letter-spacing:.4px;}
+input[type=text],input[type=number],input[type=date],select,textarea{
+  width:100%;background:var(--panel-2);border:1px solid var(--border);
+  color:var(--text);padding:10px 12px;border-radius:7px;font-size:14px;
+  font-family:var(--sans);outline:none;transition:.15s;
+}
+input:focus,select:focus,textarea:focus{border-color:var(--amber);box-shadow:0 0 0 3px rgba(255,138,61,.12);}
+textarea{resize:vertical;min-height:54px;}
+
+.btn{
+  display:inline-flex;align-items:center;gap:7px;
+  background:var(--panel-2);border:1px solid var(--border);color:var(--text);
+  padding:9px 16px;border-radius:7px;font-size:13.5px;font-weight:600;
+  cursor:pointer;font-family:var(--sans);transition:.15s;
+}
+.btn:hover{border-color:var(--amber);}
+.btn-primary{background:var(--amber);color:#1A1208;border-color:var(--amber);}
+.btn-primary:hover{background:#FF9D5C;}
+.btn-teal{background:var(--teal);color:#06201C;border-color:var(--teal);}
+.btn-danger{color:var(--red);}
+.btn-ghost{background:transparent;}
+.btn:disabled{opacity:.4;cursor:not-allowed;}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;}
+
+/* ===== TIPO TOGGLE ===== */
+.toggle{display:flex;background:var(--panel-2);border:1px solid var(--border);border-radius:7px;overflow:hidden;width:fit-content;}
+.toggle button{background:transparent;border:none;color:var(--muted);padding:9px 18px;font-size:13.5px;font-weight:600;cursor:pointer;font-family:var(--sans);}
+.toggle button.on{background:var(--teal);color:#06201C;}
+
+/* ===== SCAN BOX — signature element ===== */
+.scanbox{
+  position:relative;background:#0A0E13;border:1px solid var(--border);
+  border-radius:10px;padding:18px;overflow:hidden;
+}
+.scanbox.active{border-color:var(--amber);}
+.scan-line{
+  position:absolute;left:0;right:0;height:2px;
+  background:linear-gradient(90deg,transparent,var(--amber),transparent);
+  top:0;opacity:0;
+}
+.scanbox.active .scan-line{animation:sweep 1.1s linear infinite;opacity:1;}
+@keyframes sweep{0%{top:6px;}50%{top:calc(100% - 8px);}100%{top:6px;}}
+.scan-input-wrap{display:flex;align-items:center;gap:12px;}
+.scan-dot{width:10px;height:10px;border-radius:50%;background:#3A4452;flex-shrink:0;}
+.scanbox.active .scan-dot{background:var(--green);box-shadow:0 0 8px var(--green);}
+#scanInput{
+  font-family:var(--mono);font-size:18px;letter-spacing:1px;
+  background:transparent;border:none;color:var(--amber);padding:6px 0;
+}
+#scanInput:focus{box-shadow:none;}
+.scan-hint{font-family:var(--mono);font-size:11px;color:var(--muted);margin-top:8px;}
+.scan-flash{
+  font-family:var(--mono);font-size:12.5px;margin-top:10px;padding:8px 10px;
+  border-radius:6px;display:none;
+}
+.scan-flash.ok{display:block;background:rgba(61,220,132,.1);color:var(--green);border:1px solid rgba(61,220,132,.3);}
+.scan-flash.err{display:block;background:rgba(255,92,92,.1);color:var(--red);border:1px solid rgba(255,92,92,.3);}
+
+/* ===== TABLE ===== */
+table{width:100%;border-collapse:collapse;font-size:13.5px;}
+thead th{
+  text-align:left;font-size:10.5px;text-transform:uppercase;letter-spacing:.5px;
+  color:var(--muted);padding:8px 10px;border-bottom:1px solid var(--border);
+}
+tbody td{padding:9px 10px;border-bottom:1px solid #1F2734;}
+tbody tr:hover{background:#1A2230;}
+td.num,th.num{text-align:right;font-family:var(--mono);}
+td.codice{font-family:var(--mono);color:var(--teal);font-size:12.5px;}
+.qty-ctrl{display:flex;align-items:center;gap:6px;justify-content:flex-end;}
+.qty-ctrl button{width:24px;height:24px;border-radius:5px;background:var(--panel-2);border:1px solid var(--border);color:var(--text);cursor:pointer;font-size:14px;line-height:1;}
+.qty-ctrl input{width:50px;text-align:center;padding:5px;font-family:var(--mono);}
+.rm-btn{background:none;border:none;color:var(--muted);cursor:pointer;font-size:16px;}
+.rm-btn:hover{color:var(--red);}
+.empty-row td{text-align:center;color:var(--muted);padding:30px;font-size:13px;}
+
+.totals{display:flex;justify-content:flex-end;gap:32px;padding:14px 10px 4px;font-family:var(--mono);}
+.totals .t-label{color:var(--muted);font-size:11px;text-transform:uppercase;display:block;}
+.totals .t-val{font-size:18px;font-weight:700;}
+.totals .t-val.amber{color:var(--amber);}
+
+/* ===== SEARCH DROPDOWN ===== */
+.searchwrap{position:relative;}
+.dropdown{
+  position:absolute;top:100%;left:0;right:0;background:var(--panel-2);
+  border:1px solid var(--border);border-radius:7px;margin-top:4px;max-height:260px;
+  overflow-y:auto;z-index:30;display:none;
+}
+.dropdown.show{display:block;}
+.dd-item{padding:9px 12px;cursor:pointer;border-bottom:1px solid #1F2734;font-size:13px;}
+.dd-item:last-child{border-bottom:none;}
+.dd-item:hover{background:#26303F;}
+.dd-item .dd-cod{font-family:var(--mono);color:var(--teal);font-size:11.5px;}
+.dd-item .dd-desc{color:var(--text);}
+.dd-item .dd-price{float:right;font-family:var(--mono);color:var(--muted);font-size:12px;}
+
+/* ===== BADGES / STATUS ===== */
+.badge{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:20px;font-size:11.5px;font-weight:600;font-family:var(--mono);}
+.badge.green{background:rgba(61,220,132,.12);color:var(--green);}
+.badge.muted{background:#1F2734;color:var(--muted);}
+.badge.amber{background:rgba(255,138,61,.12);color:var(--amber);}
+
+.dropzone{
+  border:2px dashed var(--border);border-radius:10px;padding:30px;text-align:center;
+  cursor:pointer;transition:.15s;
+}
+.dropzone:hover,.dropzone.drag{border-color:var(--amber);background:rgba(255,138,61,.04);}
+.dropzone svg{margin-bottom:8px;opacity:.6;}
+.dropzone p{margin:4px 0;color:var(--muted);font-size:13px;}
+.dropzone strong{color:var(--text);}
+
+.col-map{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px;}
+.col-map label{margin-bottom:3px;}
+
+.archive-item{
+  display:flex;justify-content:space-between;align-items:center;
+  padding:12px 14px;border:1px solid var(--border);border-radius:8px;margin-bottom:8px;
+  background:var(--panel-2);
+}
+.archive-item:hover{border-color:var(--teal);}
+.archive-meta{font-size:12.5px;color:var(--muted);}
+.archive-meta b{color:var(--text);}
+
+/* ===== CAMERA MODAL ===== */
+.camera-modal{
+  display:none;position:fixed;inset:0;background:#05080C;z-index:200;
+  flex-direction:column;
+}
+.camera-modal.show{display:flex;}
+.cam-header{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:14px 18px;border-bottom:1px solid var(--border);background:var(--panel);
+}
+.cam-header span{font-weight:600;font-size:14px;}
+.cam-close{background:var(--panel-2);border:1px solid var(--border);color:var(--text);width:34px;height:34px;border-radius:50%;cursor:pointer;font-size:16px;}
+.cam-video-wrap{position:relative;flex:1;background:#000;overflow:hidden;min-height:0;}
+.cam-video-wrap video{width:100%;height:100%;object-fit:cover;display:block;}
+.cam-reticle{
+  position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+  width:78%;max-width:420px;height:34%;
+  border:2px solid var(--amber);border-radius:10px;
+  box-shadow:0 0 0 2000px rgba(0,0,0,.35);
+  pointer-events:none;
+}
+.cam-status{padding:12px 18px;font-size:13px;color:var(--muted);background:var(--panel);text-align:center;border-bottom:1px solid var(--border);}
+.cam-feed{padding:10px 14px;background:var(--panel);max-height:160px;overflow-y:auto;}
+.cam-chip{
+  font-family:var(--mono);font-size:12.5px;padding:7px 10px;border-radius:6px;margin-bottom:6px;
+}
+.cam-chip.ok{background:rgba(61,220,132,.1);color:var(--green);border:1px solid rgba(61,220,132,.25);}
+.cam-chip.err{background:rgba(255,92,92,.1);color:var(--red);border:1px solid rgba(255,92,92,.25);}
+
+@media print{
+  header,nav,.no-print{display:none !important;}
+  body{background:#fff;color:#000;}
+  main{max-width:100%;padding:0;}
+  .panel{border:none;background:#fff;padding:0;}
+  table{font-size:12px;}
+  thead th{color:#000;border-bottom:2px solid #000;}
+  tbody td{border-bottom:1px solid #ccc;}
+}
+</style>
+</head>
+<body>
+
+<header class="no-print">
+  <div class="brand">
+    <div class="brand-mark">PG</div>
+    <div class="brand-text"><b>Ordini Barcode</b><span>Power Group · Alyante/Gamma</span></div>
+  </div>
+  <nav>
+    <button class="tab-btn active" data-view="ordine">Ordine</button>
+    <button class="tab-btn" data-view="anagrafica">Anagrafica</button>
+    <button class="tab-btn" data-view="archivio">Archivio</button>
+  </nav>
+</header>
+
+<main>
+
+<!-- ===================== VIEW: ORDINE ===================== -->
+<div class="view active" id="view-ordine">
+
+  <div class="panel">
+    <h2>Dati ordine</h2>
+    <p class="sub">Imposta tipo, soggetto e riferimento prima di iniziare la scansione.</p>
+    <div class="grid grid-3">
+      <div>
+        <label>Tipo ordine</label>
+        <div class="toggle">
+          <button id="tipoFornitore" class="on">Fornitore</button>
+          <button id="tipoCliente">Cliente</button>
+        </div>
+      </div>
+      <div>
+        <label id="soggettoLabel">Fornitore</label>
+        <input type="text" id="soggettoInput" list="soggettoList" placeholder="Ragione sociale">
+        <datalist id="soggettoList"></datalist>
+      </div>
+      <div>
+        <label>Riferimento / N° ordine</label>
+        <input type="text" id="riferimentoInput" placeholder="es. ORD-2026-014">
+      </div>
+    </div>
+    <div class="grid grid-2" style="margin-top:14px;">
+      <div>
+        <label>Data</label>
+        <input type="date" id="dataInput">
+      </div>
+      <div>
+        <label>Note</label>
+        <input type="text" id="noteInput" placeholder="Facoltativo">
+      </div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>Scansione barcode</h2>
+    <p class="sub">Il campo resta sempre attivo: punta il lettore e spara. Invio automatico dello scanner aggiunge la riga.</p>
+    <div class="scanbox" id="scanBox">
+      <div class="scan-line"></div>
+      <div class="scan-input-wrap">
+        <div class="scan-dot" id="scanDot"></div>
+        <input type="text" id="scanInput" placeholder="In attesa di scansione…" autocomplete="off">
+      </div>
+      <div class="scan-hint">Puoi anche digitare il codice manualmente e premere Invio.</div>
+      <div class="row" style="margin-top:12px;">
+        <button class="btn btn-teal" id="btnCamera">📷 Scansiona con fotocamera</button>
+      </div>
+      <div class="scan-flash" id="scanFlash"></div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="row" style="justify-content:space-between;margin-bottom:14px;">
+      <h2 style="margin:0;">Aggiungi manualmente</h2>
+    </div>
+    <div class="searchwrap">
+      <input type="text" id="manualSearch" placeholder="Cerca per codice o descrizione…">
+      <div class="dropdown" id="manualDropdown"></div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="row" style="justify-content:space-between;">
+      <h2 style="margin:0;">Righe ordine</h2>
+      <span class="badge muted" id="rigaCount">0 righe</span>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th>Codice</th><th>Descrizione</th><th class="num">Prezzo</th><th class="num">Qtà</th><th class="num">Totale</th><th></th>
+        </tr>
+      </thead>
+      <tbody id="orderRows">
+        <tr class="empty-row"><td colspan="6">Nessuna riga. Scansiona un codice a barre per iniziare.</td></tr>
+      </tbody>
+    </table>
+    <div class="totals">
+      <div><span class="t-label">Articoli</span><span class="t-val" id="totArticoli">0</span></div>
+      <div><span class="t-label">Totale</span><span class="t-val amber" id="totImporto">€ 0,00</span></div>
+    </div>
+  </div>
+
+  <div class="panel no-print">
+    <div class="row" style="justify-content:space-between;">
+      <div class="row">
+        <button class="btn" id="btnNuovo">Nuovo ordine</button>
+        <button class="btn" id="btnStampa">Stampa / PDF</button>
+      </div>
+      <button class="btn btn-primary" id="btnEsporta">Esporta Excel</button>
+    </div>
+  </div>
+
+</div>
+
+<!-- ===================== VIEW: ANAGRAFICA ===================== -->
+<div class="view" id="view-anagrafica">
+
+  <div class="panel">
+    <h2>Carica anagrafica articoli</h2>
+    <p class="sub">File Excel esportato da Gamma Enterprise / Alyante (es. anagrafica articoli con barcode e prezzi).</p>
+    <div class="dropzone" id="dropzone">
+      <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="#8A97A8" stroke-width="1.5"><path d="M12 3v12m0 0l-4-4m4 4l4-4M5 21h14"/></svg>
+      <p><strong>Trascina il file qui</strong> oppure clicca per selezionarlo</p>
+      <p>.xlsx · .xls · .csv</p>
+    </div>
+    <input type="file" id="fileInput" accept=".xlsx,.xls,.csv" style="display:none;">
+    <div id="mapSection" style="display:none;">
+      <p class="sub" style="margin-top:18px;">Abbina le colonne del file ai campi richiesti:</p>
+      <div class="col-map">
+        <div><label>Codice articolo *</label><select id="mapCodice"></select></div>
+        <div><label>Descrizione *</label><select id="mapDescrizione"></select></div>
+        <div><label>Barcode / EAN</label><select id="mapBarcode"></select></div>
+        <div><label>Prezzo</label><select id="mapPrezzo"></select></div>
+        <div><label>Fornitore (opzionale)</label><select id="mapFornitore"></select></div>
+        <div><label>Cliente (opzionale)</label><select id="mapCliente"></select></div>
+      </div>
+      <div class="row" style="margin-top:16px;">
+        <button class="btn btn-primary" id="btnConfermaMappa">Conferma e carica</button>
+        <button class="btn btn-ghost" id="btnAnnullaMappa">Annulla</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel" id="anagraficaStatus">
+    <h2>Stato anagrafica</h2>
+    <div id="anagraficaInfo"><p class="sub">Nessuna anagrafica caricata.</p></div>
+  </div>
+
+  <div class="panel" id="anagraficaPreviewPanel" style="display:none;">
+    <h2>Anteprima (prime 50 righe)</h2>
+    <div class="searchwrap" style="margin-bottom:12px;">
+      <input type="text" id="anagSearch" placeholder="Filtra anagrafica…">
+    </div>
+    <table>
+      <thead><tr><th>Codice</th><th>Descrizione</th><th>Barcode</th><th class="num">Prezzo</th></tr></thead>
+      <tbody id="anagRows"></tbody>
+    </table>
+  </div>
+
+</div>
+
+<!-- ===================== VIEW: ARCHIVIO ===================== -->
+<div class="view" id="view-archivio">
+  <div class="panel">
+    <h2>Archivio ordini</h2>
+    <p class="sub">Ordini esportati da questo dispositivo. Clicca per ricaricare e riesportare.</p>
+    <div id="archiveList"><p class="sub">Nessun ordine in archivio.</p></div>
+  </div>
+</div>
+
+</main>
+
+<div class="camera-modal" id="cameraModal">
+  <div class="cam-header">
+    <span>Scansione fotocamera</span>
+    <button class="cam-close" id="btnCloseCamera">✕</button>
+  </div>
+  <div class="cam-video-wrap">
+    <video id="cameraVideo" playsinline autoplay muted></video>
+    <div class="cam-reticle"></div>
+  </div>
+  <div class="cam-status" id="camStatus">Avvio fotocamera…</div>
+  <div class="cam-feed" id="camFeed"></div>
+</div>
+
+<script>
+// ============================================================
+// STATE
+// ============================================================
+let anagrafica = [];        // {codice, descrizione, barcode, prezzo, fornitore, cliente}
+let anagraficaMeta = null;  // {filename, uploadedAt, count}
+let order = {
+  tipo: 'fornitore',
+  soggetto: '',
+  riferimento: '',
+  data: new Date().toISOString().slice(0,10),
+  note: '',
+  righe: [] // {codice, descrizione, barcode, prezzo, qty}
+};
+let pendingParse = null; // {headers, rows} during column mapping
+
+const fmtMoney = n => '€ ' + (Number(n)||0).toLocaleString('it-IT',{minimumFractionDigits:2,maximumFractionDigits:2});
+
+// ============================================================
+// STORAGE HELPERS
+// ============================================================
+async function storeSet(key, value){
+  try{ await window.storage.set(key, JSON.stringify(value), false); }
+  catch(e){ console.error('storage set failed', key, e); }
+}
+async function storeGet(key){
+  try{
+    const r = await window.storage.get(key, false);
+    return r ? JSON.parse(r.value) : null;
+  }catch(e){ return null; }
+}
+
+async function saveOrderDraft(){
+  await storeSet('ordine-corrente', order);
+}
+async function loadOrderDraft(){
+  const d = await storeGet('ordine-corrente');
+  if(d){ order = d; }
+}
+async function saveAnagrafica(){
+  await storeSet('anagrafica-data', anagrafica);
+  await storeSet('anagrafica-meta', anagraficaMeta);
+}
+async function loadAnagrafica(){
+  const a = await storeGet('anagrafica-data');
+  const m = await storeGet('anagrafica-meta');
+  if(a){ anagrafica = a; }
+  if(m){ anagraficaMeta = m; }
+}
+
+// ============================================================
+// NAV
+// ============================================================
+document.querySelectorAll('.tab-btn').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    closeCamera();
+    document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
+    document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('view-'+btn.dataset.view).classList.add('active');
+    if(btn.dataset.view==='archivio') renderArchive();
+    if(btn.dataset.view==='ordine') focusScan();
+  });
+});
+
+// ============================================================
+// TIPO TOGGLE
+// ============================================================
+const tipoFornitoreBtn = document.getElementById('tipoFornitore');
+const tipoClienteBtn = document.getElementById('tipoCliente');
+const soggettoLabel = document.getElementById('soggettoLabel');
+const soggettoList = document.getElementById('soggettoList');
+
+function setTipo(t){
+  order.tipo = t;
+  tipoFornitoreBtn.classList.toggle('on', t==='fornitore');
+  tipoClienteBtn.classList.toggle('on', t==='cliente');
+  soggettoLabel.textContent = t==='fornitore' ? 'Fornitore' : 'Cliente';
+  populateSoggettoList();
+  saveOrderDraft();
+}
+tipoFornitoreBtn.addEventListener('click', ()=>setTipo('fornitore'));
+tipoClienteBtn.addEventListener('click', ()=>setTipo('cliente'));
+
+function populateSoggettoList(){
+  const field = order.tipo==='fornitore' ? 'fornitore' : 'cliente';
+  const names = [...new Set(anagrafica.map(r=>r[field]).filter(Boolean))];
+  soggettoList.innerHTML = names.map(n=>`<option value="${escapeHtml(n)}">`).join('');
+}
+
+// ============================================================
+// HEADER FIELDS
+// ============================================================
+const soggettoInput = document.getElementById('soggettoInput');
+const riferimentoInput = document.getElementById('riferimentoInput');
+const dataInput = document.getElementById('dataInput');
+const noteInput = document.getElementById('noteInput');
+
+soggettoInput.addEventListener('input', ()=>{ order.soggetto = soggettoInput.value; saveOrderDraft(); });
+riferimentoInput.addEventListener('input', ()=>{ order.riferimento = riferimentoInput.value; saveOrderDraft(); });
+dataInput.addEventListener('input', ()=>{ order.data = dataInput.value; saveOrderDraft(); });
+noteInput.addEventListener('input', ()=>{ order.note = noteInput.value; saveOrderDraft(); });
+
+function renderHeaderFields(){
+  setTipo(order.tipo);
+  soggettoInput.value = order.soggetto || '';
+  riferimentoInput.value = order.riferimento || '';
+  dataInput.value = order.data || new Date().toISOString().slice(0,10);
+  noteInput.value = order.note || '';
+}
+
+// ============================================================
+// SCANNING
+// ============================================================
+const scanInput = document.getElementById('scanInput');
+const scanBox = document.getElementById('scanBox');
+const scanDot = document.getElementById('scanDot');
+const scanFlash = document.getElementById('scanFlash');
+
+function focusScan(){
+  if(document.getElementById('view-ordine').classList.contains('active')){
+    scanInput.focus();
+  }
+}
+scanInput.addEventListener('focus', ()=>scanBox.classList.add('active'));
+scanInput.addEventListener('blur', ()=>{
+  scanBox.classList.remove('active');
+  // refocus shortly after, unless user is interacting elsewhere intentionally
+  setTimeout(()=>{
+    const active = document.activeElement;
+    const tag = active ? active.tagName : '';
+    if(tag !== 'INPUT' && tag !== 'TEXTAREA' && tag !== 'SELECT'){
+      focusScan();
+    }
+  }, 250);
+});
+
+scanInput.addEventListener('keydown', (e)=>{
+  if(e.key === 'Enter'){
+    e.preventDefault();
+    const code = scanInput.value.trim();
+    scanInput.value = '';
+    if(code) handleScan(code);
+  }
+});
+
+function handleScan(code){
+  const item = anagrafica.find(r => r.barcode === code) || anagrafica.find(r => r.codice === code);
+  if(item){
+    addLine(item, 1);
+    flashScan('ok', `✓ ${item.codice} — ${item.descrizione}`);
+  } else {
+    flashScan('err', `✕ Codice non trovato in anagrafica: ${code}. Usa "Aggiungi manualmente" per inserirlo a mano.`);
+  }
+}
+
+function flashScan(type, msg){
+  scanFlash.className = 'scan-flash ' + type;
+  scanFlash.textContent = msg;
+  clearTimeout(flashScan._t);
+  flashScan._t = setTimeout(()=>{ scanFlash.className = 'scan-flash'; }, 3500);
+}
+
+// ============================================================
+// MANUAL SEARCH / ADD
+// ============================================================
+const manualSearch = document.getElementById('manualSearch');
+const manualDropdown = document.getElementById('manualDropdown');
+
+manualSearch.addEventListener('input', ()=>{
+  const q = manualSearch.value.trim().toLowerCase();
+  if(!q){ manualDropdown.classList.remove('show'); return; }
+  const matches = anagrafica.filter(r =>
+    (r.codice && r.codice.toLowerCase().includes(q)) ||
+    (r.descrizione && r.descrizione.toLowerCase().includes(q))
+  ).slice(0,8);
+  if(matches.length===0){
+    manualDropdown.innerHTML = `<div class="dd-item" style="color:var(--muted);">Nessun risultato</div>`;
+  } else {
+    manualDropdown.innerHTML = matches.map(m => `
+      <div class="dd-item" data-codice="${escapeHtml(m.codice)}">
+        <span class="dd-price">${fmtMoney(m.prezzo)}</span>
+        <span class="dd-cod">${escapeHtml(m.codice)}</span><br>
+        <span class="dd-desc">${escapeHtml(m.descrizione)}</span>
+      </div>`).join('');
+  }
+  manualDropdown.classList.add('show');
+});
+
+manualDropdown.addEventListener('click', (e)=>{
+  const item = e.target.closest('.dd-item');
+  if(!item || !item.dataset.codice) return;
+  const found = anagrafica.find(r => r.codice === item.dataset.codice);
+  if(found){
+    addLine(found, 1);
+    manualSearch.value = '';
+    manualDropdown.classList.remove('show');
+  }
+});
+document.addEventListener('click', (e)=>{
+  if(!e.target.closest('.searchwrap')) manualDropdown.classList.remove('show');
+});
+
+// ============================================================
+// ORDER LINES
+// ============================================================
+function addLine(item, qty){
+  const existing = order.righe.find(r => r.codice === item.codice);
+  if(existing){
+    existing.qty += qty;
+  } else {
+    order.righe.push({
+      codice: item.codice,
+      descrizione: item.descrizione,
+      barcode: item.barcode || '',
+      prezzo: Number(item.prezzo)||0,
+      qty: qty
+    });
+  }
+  renderOrderRows();
+  saveOrderDraft();
+}
+
+function renderOrderRows(){
+  const tbody = document.getElementById('orderRows');
+  if(order.righe.length === 0){
+    tbody.innerHTML = `<tr class="empty-row"><td colspan="6">Nessuna riga. Scansiona un codice a barre per iniziare.</td></tr>`;
+  } else {
+    tbody.innerHTML = order.righe.map((r,i)=>`
+      <tr data-i="${i}">
+        <td class="codice">${escapeHtml(r.codice)}</td>
+        <td>${escapeHtml(r.descrizione)}</td>
+        <td class="num">${fmtMoney(r.prezzo)}</td>
+        <td class="num">
+          <div class="qty-ctrl">
+            <button class="qty-dec" data-i="${i}">−</button>
+            <input type="number" class="qty-input" data-i="${i}" value="${r.qty}" min="0">
+            <button class="qty-inc" data-i="${i}">+</button>
+          </div>
+        </td>
+        <td class="num">${fmtMoney(r.prezzo * r.qty)}</td>
+        <td><button class="rm-btn" data-i="${i}" title="Rimuovi riga">✕</button></td>
+      </tr>`).join('');
+  }
+  document.getElementById('rigaCount').textContent = order.righe.length + ' righe';
+  const totArt = order.righe.reduce((s,r)=>s+r.qty,0);
+  const totImp = order.righe.reduce((s,r)=>s+r.qty*r.prezzo,0);
+  document.getElementById('totArticoli').textContent = totArt;
+  document.getElementById('totImporto').textContent = fmtMoney(totImp);
+}
+
+document.getElementById('orderRows').addEventListener('click', (e)=>{
+  const i = e.target.dataset.i;
+  if(i===undefined) return;
+  if(e.target.classList.contains('qty-inc')){ order.righe[i].qty++; }
+  else if(e.target.classList.contains('qty-dec')){ order.righe[i].qty = Math.max(0,order.righe[i].qty-1); }
+  else if(e.target.classList.contains('rm-btn')){ order.righe.splice(i,1); }
+  else return;
+  if(order.righe[i] && order.righe[i].qty===0) order.righe.splice(i,1);
+  renderOrderRows();
+  saveOrderDraft();
+});
+document.getElementById('orderRows').addEventListener('change', (e)=>{
+  if(e.target.classList.contains('qty-input')){
+    const i = e.target.dataset.i;
+    let v = parseInt(e.target.value)||0;
+    if(v<=0){ order.righe.splice(i,1); } else { order.righe[i].qty = v; }
+    renderOrderRows();
+    saveOrderDraft();
+  }
+});
+
+// ============================================================
+// NUOVO ORDINE
+// ============================================================
+document.getElementById('btnNuovo').addEventListener('click', ()=>{
+  if(order.righe.length>0 && !confirm('Iniziare un nuovo ordine? Le righe correnti andranno perse se non esportate.')) return;
+  order = {tipo:'fornitore', soggetto:'', riferimento:'', data:new Date().toISOString().slice(0,10), note:'', righe:[]};
+  renderHeaderFields();
+  renderOrderRows();
+  saveOrderDraft();
+  focusScan();
+});
+
+// ============================================================
+// STAMPA
+// ============================================================
+document.getElementById('btnStampa').addEventListener('click', ()=>window.print());
+
+// ============================================================
+// EXPORT EXCEL
+// ============================================================
+document.getElementById('btnEsporta').addEventListener('click', async ()=>{
+  if(order.righe.length===0){ alert('Aggiungi almeno una riga prima di esportare.'); return; }
+
+  const headerRows = [
+    ['Tipo ordine', order.tipo==='fornitore' ? 'Fornitore' : 'Cliente'],
+    [order.tipo==='fornitore' ? 'Fornitore' : 'Cliente', order.soggetto || ''],
+    ['Riferimento', order.riferimento || ''],
+    ['Data', order.data || ''],
+    ['Note', order.note || ''],
+    []
+  ];
+  const colHeaders = ['Codice','Descrizione','Barcode','Quantità','Prezzo Unitario','Totale Riga'];
+  const dataRows = order.righe.map(r => [r.codice, r.descrizione, r.barcode, r.qty, r.prezzo, +(r.prezzo*r.qty).toFixed(2)]);
+  const totRow = ['','','','','Totale ordine', +order.righe.reduce((s,r)=>s+r.qty*r.prezzo,0).toFixed(2)];
+
+  const wsData = [...headerRows, colHeaders, ...dataRows, [], totRow];
+  const ws = XLSX.utils.aoa_to_sheet(wsData);
+  ws['!cols'] = [{wch:14},{wch:38},{wch:16},{wch:10},{wch:14},{wch:14}];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Ordine');
+
+  const safeName = (order.soggetto || 'ordine').replace(/[^a-z0-9]+/gi,'_').slice(0,30);
+  const filename = `Ordine_${order.tipo}_${safeName}_${order.data}.xlsx`;
+  XLSX.writeFile(wb, filename);
+
+  await archiveOrder();
+});
+
+async function archiveOrder(){
+  const id = Date.now().toString();
+  const totale = order.righe.reduce((s,r)=>s+r.qty*r.prezzo,0);
+  const index = (await storeGet('ordini-index')) || [];
+  index.unshift({id, tipo:order.tipo, soggetto:order.soggetto, riferimento:order.riferimento, data:order.data, totale, righe:order.righe.length});
+  await storeSet('ordini-index', index.slice(0,200));
+  await storeSet('ordine:'+id, order);
+}
+
+// ============================================================
+// ARCHIVIO VIEW
+// ============================================================
+async function renderArchive(){
+  const list = document.getElementById('archiveList');
+  const index = (await storeGet('ordini-index')) || [];
+  if(index.length===0){
+    list.innerHTML = '<p class="sub">Nessun ordine in archivio.</p>';
+    return;
+  }
+  list.innerHTML = index.map(it => `
+    <div class="archive-item" data-id="${it.id}">
+      <div>
+        <div><b>${escapeHtml(it.soggetto || '(senza nome)')}</b> <span class="badge ${it.tipo==='fornitore'?'amber':'green'}">${it.tipo}</span></div>
+        <div class="archive-meta">${it.data || ''} · rif. ${escapeHtml(it.riferimento||'—')} · ${it.righe} righe · <b>${fmtMoney(it.totale)}</b></div>
+      </div>
+      <button class="btn btn-ghost reload-btn" data-id="${it.id}">Ricarica</button>
+    </div>`).join('');
+}
+document.getElementById('archiveList').addEventListener('click', async (e)=>{
+  if(!e.target.classList.contains('reload-btn')) return;
+  const id = e.target.dataset.id;
+  const saved = await storeGet('ordine:'+id);
+  if(saved){
+    order = saved;
+    renderHeaderFields();
+    renderOrderRows();
+    saveOrderDraft();
+    document.querySelector('.tab-btn[data-view="ordine"]').click();
+  }
+});
+
+// ============================================================
+// ANAGRAFICA UPLOAD
+// ============================================================
+const dropzone = document.getElementById('dropzone');
+const fileInput = document.getElementById('fileInput');
+
+dropzone.addEventListener('click', ()=>fileInput.click());
+dropzone.addEventListener('dragover', e=>{e.preventDefault();dropzone.classList.add('drag');});
+dropzone.addEventListener('dragleave', ()=>dropzone.classList.remove('drag'));
+dropzone.addEventListener('drop', e=>{
+  e.preventDefault(); dropzone.classList.remove('drag');
+  if(e.dataTransfer.files[0]) parseFile(e.dataTransfer.files[0]);
+});
+fileInput.addEventListener('change', e=>{
+  if(e.target.files[0]) parseFile(e.target.files[0]);
+});
+
+function parseFile(file){
+  const reader = new FileReader();
+  reader.onload = (e)=>{
+    try{
+      const wb = XLSX.read(e.target.result, {type:'array'});
+      const sheet = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(sheet, {header:1, defval:''});
+      if(rows.length < 2){ alert('File vuoto o non leggibile.'); return; }
+      const headers = rows[0].map(h => String(h).trim());
+      const dataRows = rows.slice(1).filter(r => r.some(c => String(c).trim()!==''));
+      pendingParse = {headers, rows: dataRows, filename: file.name};
+      showColumnMapping(headers);
+    }catch(err){
+      alert('Errore nella lettura del file: ' + err.message);
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+function showColumnMapping(headers){
+  const selects = ['mapCodice','mapDescrizione','mapBarcode','mapPrezzo','mapFornitore','mapCliente'];
+  const guesses = {
+    mapCodice: ['codice','cod. articolo','cod articolo','codice articolo','articolo'],
+    mapDescrizione: ['descrizione','descrizione articolo','desc'],
+    mapBarcode: ['barcode','ean','cod. barre','codice a barre','cod a barre'],
+    mapPrezzo: ['prezzo','prezzo unitario','prezzo vendita','prezzo listino','listino'],
+    mapFornitore: ['fornitore','rag. soc. fornitore'],
+    mapCliente: ['cliente','rag. soc. cliente']
+  };
+  selects.forEach(id=>{
+    const sel = document.getElementById(id);
+    sel.innerHTML = '<option value="">— Non presente —</option>' +
+      headers.map((h,i)=>`<option value="${i}">${escapeHtml(h || '(colonna '+(i+1)+')')}</option>`).join('');
+    const candidates = guesses[id];
+    const idx = headers.findIndex(h => candidates.some(c => h.toLowerCase().includes(c)));
+    if(idx>=0) sel.value = idx;
+  });
+  document.getElementById('mapSection').style.display = 'block';
+}
+
+document.getElementById('btnAnnullaMappa').addEventListener('click', ()=>{
+  document.getElementById('mapSection').style.display = 'none';
+  fileInput.value = '';
+  pendingParse = null;
+});
+
+document.getElementById('btnConfermaMappa').addEventListener('click', async ()=>{
+  if(!pendingParse) return;
+  const idxCodice = document.getElementById('mapCodice').value;
+  const idxDesc = document.getElementById('mapDescrizione').value;
+  const idxBarcode = document.getElementById('mapBarcode').value;
+  const idxPrezzo = document.getElementById('mapPrezzo').value;
+  const idxFornitore = document.getElementById('mapFornitore').value;
+  const idxCliente = document.getElementById('mapCliente').value;
+
+  if(idxCodice==='' || idxDesc===''){
+    alert('Codice articolo e Descrizione sono obbligatori.');
+    return;
+  }
+
+  anagrafica = pendingParse.rows.map(r => ({
+    codice: String(r[idxCodice]??'').trim(),
+    descrizione: String(r[idxDesc]??'').trim(),
+    barcode: idxBarcode!=='' ? String(r[idxBarcode]??'').trim() : '',
+    prezzo: idxPrezzo!=='' ? (parseFloat(String(r[idxPrezzo]).replace(',','.'))||0) : 0,
+    fornitore: idxFornitore!=='' ? String(r[idxFornitore]??'').trim() : '',
+    cliente: idxCliente!=='' ? String(r[idxCliente]??'').trim() : ''
+  })).filter(r => r.codice);
+
+  anagraficaMeta = {filename: pendingParse.filename, uploadedAt: new Date().toISOString(), count: anagrafica.length};
+  await saveAnagrafica();
+  document.getElementById('mapSection').style.display = 'none';
+  pendingParse = null;
+  fileInput.value = '';
+  renderAnagraficaStatus();
+  renderAnagraficaPreview();
+  populateSoggettoList();
+});
+
+function renderAnagraficaStatus(){
+  const info = document.getElementById('anagraficaInfo');
+  if(!anagraficaMeta || anagrafica.length===0){
+    info.innerHTML = '<p class="sub">Nessuna anagrafica caricata.</p>';
+    document.getElementById('anagraficaPreviewPanel').style.display = 'none';
+    return;
+  }
+  const withBarcode = anagrafica.filter(r=>r.barcode).length;
+  info.innerHTML = `
+    <div class="row" style="gap:18px;flex-wrap:wrap;">
+      <span class="badge green">✓ Caricata</span>
+      <span>${escapeHtml(anagraficaMeta.filename)}</span>
+      <span class="badge muted">${anagraficaMeta.count} articoli</span>
+      <span class="badge muted">${withBarcode} con barcode</span>
+    </div>
+    <div class="row" style="margin-top:14px;">
+      <button class="btn btn-danger" id="btnCancellaAnag">Elimina anagrafica</button>
+    </div>`;
+  document.getElementById('btnCancellaAnag').addEventListener('click', async ()=>{
+    if(!confirm("Eliminare l'anagrafica caricata?")) return;
+    anagrafica = []; anagraficaMeta = null;
+    await saveAnagrafica();
+    renderAnagraficaStatus();
+  });
+  document.getElementById('anagraficaPreviewPanel').style.display = 'block';
+}
+
+function renderAnagraficaPreview(filter){
+  const tbody = document.getElementById('anagRows');
+  let rows = anagrafica;
+  if(filter){
+    const q = filter.toLowerCase();
+    rows = rows.filter(r => r.codice.toLowerCase().includes(q) || r.descrizione.toLowerCase().includes(q) || r.barcode.toLowerCase().includes(q));
+  }
+  tbody.innerHTML = rows.slice(0,50).map(r => `
+    <tr><td class="codice">${escapeHtml(r.codice)}</td><td>${escapeHtml(r.descrizione)}</td><td class="codice">${escapeHtml(r.barcode)}</td><td class="num">${fmtMoney(r.prezzo)}</td></tr>
+  `).join('') || `<tr class="empty-row"><td colspan="4">Nessun risultato.</td></tr>`;
+}
+document.getElementById('anagSearch').addEventListener('input', e=>renderAnagraficaPreview(e.target.value));
+
+// ============================================================
+// CAMERA SCANNING
+// ============================================================
+let codeReader = null;
+let lastCamCode = null, lastCamTime = 0;
+const CAM_COOLDOWN = 1800;
+
+async function openCamera(){
+  const modal = document.getElementById('cameraModal');
+  const status = document.getElementById('camStatus');
+  document.getElementById('camFeed').innerHTML = '';
+  modal.classList.add('show');
+  status.textContent = 'Avvio fotocamera…';
+
+  if(location.protocol === 'file:'){
+    status.textContent = 'La fotocamera richiede una pagina servita in HTTPS (es. GitHub Pages). Aprendo il file localmente il browser blocca l\'accesso alla fotocamera — pubblica l\'app online per usarla dal telefono.';
+    return;
+  }
+  if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+    status.textContent = 'Fotocamera non supportata su questo browser.';
+    return;
+  }
+  if(typeof ZXing === 'undefined'){
+    status.textContent = 'Libreria di scansione non disponibile (controlla la connessione internet al primo avvio).';
+    return;
+  }
+  try{
+    codeReader = new ZXing.BrowserMultiFormatReader();
+    const videoElem = document.getElementById('cameraVideo');
+    await codeReader.decodeFromConstraints(
+      {video:{facingMode:{ideal:'environment'}}},
+      videoElem,
+      (result)=>{ if(result) handleCameraScan(result.getText()); }
+    );
+    status.textContent = 'Inquadra il codice a barre…';
+  }catch(err){
+    status.textContent = 'Impossibile avviare la fotocamera: ' + err.message + '. Controlla i permessi del browser.';
+  }
+}
+
+function closeCamera(){
+  document.getElementById('cameraModal').classList.remove('show');
+  if(codeReader){ try{ codeReader.reset(); }catch(e){} codeReader = null; }
+}
+
+function handleCameraScan(code){
+  const now = Date.now();
+  if(code === lastCamCode && (now - lastCamTime) < CAM_COOLDOWN) return;
+  lastCamCode = code; lastCamTime = now;
+
+  const item = anagrafica.find(r => r.barcode === code) || anagrafica.find(r => r.codice === code);
+  const feed = document.getElementById('camFeed');
+  const chip = document.createElement('div');
+  if(item){
+    addLine(item, 1);
+    if(navigator.vibrate) navigator.vibrate(60);
+    chip.className = 'cam-chip ok';
+    chip.textContent = `✓ ${item.codice} — ${item.descrizione}`;
+  } else {
+    if(navigator.vibrate) navigator.vibrate([40,40,40]);
+    chip.className = 'cam-chip err';
+    chip.textContent = `✕ Non trovato: ${code}`;
+  }
+  feed.prepend(chip);
+  while(feed.children.length > 6) feed.removeChild(feed.lastChild);
+}
+
+document.getElementById('btnCamera').addEventListener('click', openCamera);
+document.getElementById('btnCloseCamera').addEventListener('click', closeCamera);
+
+// ============================================================
+// UTIL
+// ============================================================
+function escapeHtml(s){
+  return String(s??'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+// ============================================================
+// INIT
+// ============================================================
+(async function init(){
+  await loadAnagrafica();
+  await loadOrderDraft();
+  renderHeaderFields();
+  renderOrderRows();
+  renderAnagraficaStatus();
+  renderAnagraficaPreview();
+  populateSoggettoList();
+  focusScan();
+})();
+</script>
+</body>
+</html>
